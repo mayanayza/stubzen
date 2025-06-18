@@ -119,63 +119,67 @@ class ProjectDiscovery:
         if str(self.project_root) not in sys.path:
             sys.path.insert(0, str(self.project_root))
 
-    def discover_target_classes(self) -> Dict[str, List[ClassInfo]]:
-        """Discover all target classes in the project, grouped by module"""
+    def discover_modules(self) -> Dict[str, List[ClassInfo]]:
+        """Discover ALL modules and ALL classes for complete PEP 561 stub generation"""
         classes_by_module = {}
 
-        logger.info(f"🔍 Searching for Python modules in {self.project_root}")
-        logger.info(f"🚫 Excluding directories: {StubzenConfig().exclude_dirs}")
+        logger.info(f"🔍 Searching for ALL modules for PEP 561 generation in {self.project_root}")
 
-        # Use ModuleFinder to get all modules
+        # Get all modules (same as before)
         module_names = ModuleFinder.find_modules_in_path(
             self.project_root,
             StubzenConfig().exclude_dirs
         )
 
-        logger.info(f"📦 Found {len(module_names)} modules to check")
+        logger.info(f"📦 Found {len(module_names)} modules to process")
 
-        # Use ClassFinder to get all target classes
-        logger.info("🔍 Running ClassFinder.find_classes_in_modules...")
-        target_classes = ClassFinder.find_classes_in_modules(
-            module_names,
-            self.class_identifier.is_target_class,
-            recursive=True
-        )
+        for module_name in module_names:
+            try:
+                if module_name in sys.modules:
+                    module = sys.modules[module_name]
+                else:
+                    module = importlib.import_module(module_name)
 
-        logger.info(f"✅ Found {len(target_classes)} target classes total")
+                module_classes = []
 
-        # Group classes by their module
-        for cls in target_classes:
-            module_path = cls.__module__
+                # Get ALL classes in the module (not just target classes)
+                for name, cls in inspect.getmembers(module, inspect.isclass):
+                    # Only include classes actually defined in this module
+                    if cls.__module__ != module_name:
+                        continue
 
-            if module_path not in classes_by_module:
-                classes_by_module[module_path] = []
+                    # Determine category and how to handle this class
+                    if self.class_identifier.is_target_class(cls):
+                        # Full signature extraction WITH mixin incorporation
+                        category = self.class_identifier.get_class_category(cls)
+                    else:
+                        # Full signature extraction WITHOUT mixin incorporation
+                        category = 'standard'
 
-            # Create ClassInfo
-            base_classes = [base.__name__ for base in cls.__bases__]
-            category = self.class_identifier.get_class_category(cls)
+                    base_classes = [base.__name__ for base in cls.__bases__]
+                    file_path = self._get_file_path_for_module(module_name)
 
-            # Find the file path for this module
-            file_path = self._get_file_path_for_module(module_path)
+                    class_info = ClassInfo(
+                        name=name,
+                        module_path=module_name,
+                        file_path=file_path,
+                        class_obj=cls,
+                        category=category,
+                        base_classes=base_classes
+                    )
 
-            class_info = ClassInfo(
-                name=cls.__name__,
-                module_path=module_path,
-                file_path=file_path,
-                class_obj=cls,
-                category=category,
-                base_classes=base_classes
-            )
+                    module_classes.append(class_info)
 
-            classes_by_module[module_path].append(class_info)
-            logger.debug(f"  📝 {cls.__name__} ({category}) in {module_path}")
+                if module_classes:
+                    classes_by_module[module_name] = module_classes
+                    logger.debug(f"📋 {module_name}: {len(module_classes)} classes")
 
-        # Summary by module
-        for module_path, class_infos in classes_by_module.items():
-            logger.info(f"📋 {module_path}: {len(class_infos)} classes")
+            except ImportError as e:
+                logger.warning(f"Could not import {module_name}: {e}")
 
         return classes_by_module
 
+    @staticmethod
     def _get_file_path_for_module(self, module_path: str) -> Path:
         """Get the file path for a module"""
         try:
@@ -187,13 +191,4 @@ class ProjectDiscovery:
             if hasattr(module, '__file__') and module.__file__:
                 return Path(module.__file__)
         except Exception:
-            pass
-
-        # Fallback: construct path from module name
-        module_parts = module_path.split('.')
-        file_path = self.project_root
-        for part in module_parts[:-1]:
-            file_path = file_path / part
-        file_path = file_path / f"{module_parts[-1]}.py"
-
-        return file_path
+            raise RuntimeError(f"Could not get file path for module {module_path}")

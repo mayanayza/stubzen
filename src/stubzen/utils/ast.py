@@ -7,6 +7,7 @@ import inspect
 import re
 import sys
 import textwrap
+from pathlib import Path
 from typing import Type, List, Dict, Any, Optional
 
 def extract_from_init(cls: Type, type_hints: Dict[str, Type]) -> List[tuple]:
@@ -210,3 +211,163 @@ def extract_init_type_annotations(cls: Type, attribute_name: str) -> Optional[Ty
     except Exception:
         pass
     return None
+
+
+# Add this to your existing src/stubzen/utils/ast.py
+
+def extract_module_imports(module) -> List[str]:
+    """Extract import statements from a module using AST parsing"""
+    imports = []
+
+    try:
+        # Get the module's source file
+        if hasattr(module, '__file__') and module.__file__:
+            source_file = Path(module.__file__)
+            if source_file.exists():
+                source_code = source_file.read_text()
+
+                # Parse the AST
+                tree = ast.parse(source_code)
+
+                # Extract import statements at module level only
+                for node in tree.body:  # Only top-level imports
+                    if isinstance(node, ast.Import):
+                        # Handle: import module, import module as alias
+                        names = []
+                        for alias in node.names:
+                            if alias.asname:
+                                names.append(f"{alias.name} as {alias.asname}")
+                            else:
+                                names.append(alias.name)
+
+                        # Filter out imports we don't want in stubs
+                        filtered_names = [name for name in names
+                                          if not _should_skip_import_for_stub(name.split(' as ')[0])]
+
+                        if filtered_names:
+                            imports.append(f"import {', '.join(filtered_names)}")
+
+                    elif isinstance(node, ast.ImportFrom):
+                        # Handle: from module import name, from module import name as alias
+                        if node.module is None:  # from . import ... (relative import)
+                            continue
+
+                        # Skip relative imports and internal project imports
+                        if _should_skip_import_for_stub(node.module):
+                            continue
+
+                        names = []
+                        for alias in node.names:
+                            if alias.name == '*':
+                                # Skip star imports in stubs
+                                continue
+                            if alias.asname:
+                                names.append(f"{alias.name} as {alias.asname}")
+                            else:
+                                names.append(alias.name)
+
+                        if names:
+                            level_prefix = '.' * (node.level or 0)
+                            module_name = f"{level_prefix}{node.module or ''}"
+
+                            # Skip relative imports in stubs
+                            if node.level and node.level > 0:
+                                continue
+
+                            imports.append(f"from {module_name} import {', '.join(names)}")
+
+    except Exception as e:
+        # Silent failure - AST parsing can fail for various reasons
+        pass
+
+    return imports
+
+
+def _should_skip_import_for_stub(module_name: str) -> bool:
+    """Determine if an import should be skipped in stub files"""
+    if not module_name:
+        return True
+
+    # Skip internal project imports that would cause circular dependencies
+    skip_patterns = [
+        'src.',  # Internal project structure
+        '__main__',  # Main module
+        '.',  # Relative imports
+    ]
+
+    # Skip if it matches any skip pattern
+    for pattern in skip_patterns:
+        if module_name.startswith(pattern):
+            return True
+
+    # Skip if it's a module that's typically not needed in stubs
+    skip_modules = {
+        'logging',  # Usually not needed in type stubs
+        'sys',  # Runtime-only
+        'os',  # Runtime-only
+        'pathlib',  # Often causes issues in stubs
+        're',  # Runtime-only
+        'json',  # Runtime-only
+        'traceback',  # Runtime-only
+        'importlib',  # Runtime-only
+    }
+
+    return module_name in skip_modules
+
+
+def extract_module_level_functions(module) -> List[tuple]:
+    """Extract module-level function definitions"""
+    functions = []
+
+    try:
+        if hasattr(module, '__file__') and module.__file__:
+            source_file = Path(module.__file__)
+            if source_file.exists():
+                source_code = source_file.read_text()
+                tree = ast.parse(source_code)
+
+                # Extract only top-level function definitions
+                for node in tree.body:
+                    if isinstance(node, ast.FunctionDef):
+                        # Create a synthetic function object for signature extraction
+                        if hasattr(module, node.name):
+                            func_obj = getattr(module, node.name)
+                            if callable(func_obj):
+                                functions.append((node.name, func_obj))
+
+    except Exception:
+        pass
+
+    return functions
+
+
+def extract_module_level_variables(module) -> List[tuple]:
+    """Extract module-level variable assignments with type annotations"""
+    variables = []
+
+    try:
+        if hasattr(module, '__file__') and module.__file__:
+            source_file = Path(module.__file__)
+            if source_file.exists():
+                source_code = source_file.read_text()
+                tree = ast.parse(source_code)
+
+                # Extract annotated assignments at module level
+                for node in tree.body:
+                    if isinstance(node, ast.AnnAssign):
+                        if isinstance(node.target, ast.Name):
+                            var_name = node.target.id
+
+                            # Get the actual value if it exists in the module
+                            if hasattr(module, var_name):
+                                var_value = getattr(module, var_name)
+
+                                # Get type annotation
+                                type_annotation = ast_annotation_to_string(node.annotation)
+
+                                variables.append((var_name, var_value, type_annotation))
+
+    except Exception:
+        pass
+
+    return variables

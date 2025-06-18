@@ -6,6 +6,8 @@ import logging
 from pathlib import Path
 from typing import List
 
+from src.stubzen.config import StubzenConfig
+
 logger = logging.getLogger(__name__)
 
 class StubCleanCommand:
@@ -114,5 +116,89 @@ class StubCleanCommand:
                 error_msg = f"Failed to delete {stub_file}: {e}"
                 errors.append(error_msg)
                 logger.error(f"❌ {error_msg}")
+
+        return deleted_count, errors
+
+
+class StubCleaner:
+    """Handles cleanup of stub files"""
+
+    def __init__(self):
+        self.project_root = StubzenConfig().project_root
+
+    def find_all_stub_files(self) -> List[Path]:
+        """Find all .pyi files in the project"""
+        stub_files = []
+
+        # Recursively find all .pyi files
+        for pyi_file in self.project_root.rglob("*.pyi"):
+            # Skip files in virtual environments and common excluded directories
+            path_parts = pyi_file.parts
+            exclude_dirs = {'.venv', 'venv', 'env', '.env', 'node_modules', '.git', '__pycache__'}
+
+            if not any(exclude_dir in path_parts for exclude_dir in exclude_dirs):
+                stub_files.append(pyi_file)
+
+        return stub_files
+
+    def clean_all_stubs(self, dry_run: bool = False) -> tuple[int, List[str]]:
+        """
+        Delete all stub files in the project
+        Returns (count_deleted, error_messages)
+        """
+        stub_files = self.find_all_stub_files()
+        deleted_count = 0
+        errors = []
+
+        print(f"🔍 Found {len(stub_files)} stub files")
+
+        for stub_file in stub_files:
+            try:
+                if dry_run:
+                    print(f"Would delete: {stub_file}")
+                else:
+                    stub_file.unlink()
+                    print(f"🗑️  Deleted: {stub_file}")
+                deleted_count += 1
+            except Exception as e:
+                error_msg = f"Failed to delete {stub_file}: {e}"
+                errors.append(error_msg)
+                print(f"❌ {error_msg}")
+
+        return deleted_count, errors
+
+    def clean_stubs_for_modules(self, module_patterns: List[str], dry_run: bool = False) -> tuple[int, List[str]]:
+        """
+        Delete stub files matching specific module patterns
+        Returns (count_deleted, error_messages)
+        """
+        stub_files = self.find_all_stub_files()
+        matching_files = []
+
+        for stub_file in stub_files:
+            # Convert file path to module-like pattern for matching
+            relative_path = stub_file.relative_to(self.project_root)
+            module_path = str(relative_path.with_suffix('')).replace('/', '.').replace('\\', '.')
+
+            if any(pattern in module_path for pattern in module_patterns):
+                matching_files.append(stub_file)
+
+        deleted_count = 0
+        errors = []
+
+        print(f"🔍 Found {len(matching_files)} matching stub files")
+
+        for stub_file in matching_files:
+            try:
+                if dry_run:
+                    print(f"Would delete: {stub_file}")
+                else:
+                    stub_file.unlink()
+                    print(f"🗑️  Deleted: {stub_file}")
+                deleted_count += 1
+            except Exception as e:
+                error_msg = f"Failed to delete {stub_file}: {e}"
+                errors.append(error_msg)
+                print(f"❌ {error_msg}")
 
         return deleted_count, errors
