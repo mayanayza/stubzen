@@ -180,7 +180,7 @@ class ProjectDiscovery:
         return classes_by_module
 
     @staticmethod
-    def _get_file_path_for_module(self, module_path: str) -> Path:
+    def _get_file_path_for_module(module_path: str) -> Path:
         """Get the file path for a module"""
         try:
             if module_path in sys.modules:

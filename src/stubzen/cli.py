@@ -8,7 +8,8 @@ import logging
 import sys
 from pathlib import Path
 
-from stubzen.utils.logging import configure_logging
+from .commands.install import StubInstallCommand
+from .utils.logging import configure_logging
 
 from .commands.generate import StubGenerateCommand
 from .commands.clean import StubCleanCommand
@@ -55,6 +56,18 @@ Configuration is handled via config.py - modify BASE_CLASSES, MIXIN_CLASSES, etc
     # Create subparsers for different commands
     subparsers = parser.add_subparsers(dest='command', help='Available commands')
 
+    # install command
+    install_parser = subparsers.add_parser('install', help='Generate and install stubs as PEP 561 package')
+    install_parser.add_argument(
+        "--modules",
+        nargs="*",
+        help="Only generate stubs for modules matching these patterns"
+    )
+    install_parser.add_argument(
+        "--package-name",
+        help="Name for the stub package (default: PROJECT_NAME-stubs)"
+    )
+
     # Generate command
     generate_parser = subparsers.add_parser('generate', help='Generate stub files')
     generate_parser.add_argument(
@@ -96,7 +109,7 @@ Configuration is handled via config.py - modify BASE_CLASSES, MIXIN_CLASSES, etc
         if args.command == 'generate':
             logger.info("🚀 Starting stub generation...")
             command = StubGenerateCommand(args.project_root)
-            success = command.execute(getattr(args, 'modules', None))
+            success = command.execute()
 
             if success:
                 logger.info("🎉 Stub generation completed successfully!")
@@ -112,6 +125,21 @@ Configuration is handled via config.py - modify BASE_CLASSES, MIXIN_CLASSES, etc
                 sys.exit(0)
             else:
                 logger.error("💥 Stub generation completed with errors")
+                sys.exit(1)
+
+        elif args.command == 'install':
+            logger.info("🚀 Generating and installing stub package...")
+            command = StubInstallCommand(args.project_root)
+            success = command.execute(
+                module_patterns=getattr(args, 'modules', None),
+                package_name=getattr(args, 'package_name', None)
+            )
+
+            if success:
+                logger.info("🎉 Stub package installed successfully!")
+                sys.exit(0)
+            else:
+                logger.error("💥 Stub package installation failed")
                 sys.exit(1)
 
         elif args.command == 'clean':

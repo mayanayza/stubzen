@@ -1,0 +1,14 @@
+Metadata-Version: 2.4
+Name: stubzen
+Version: 0.1.0
+Summary: A short description of your package
+Author-email: Your Name <your.email@example.com>
+Project-URL: Homepage, https://github.com/yourusername/my-shared-package
+Project-URL: Repository, https://github.com/yourusername/my-shared-package
+Requires-Python: >=3.8
+Description-Content-Type: text/markdown
+Provides-Extra: dev
+Requires-Dist: pytest>=6.0; extra == "dev"
+Requires-Dist: black; extra == "dev"
+Requires-Dist: flake8; extra == "dev"
+Requires-Dist: mypy; extra == "dev"
